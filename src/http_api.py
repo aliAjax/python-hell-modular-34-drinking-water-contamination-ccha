@@ -41,7 +41,11 @@ def build_handler(service, static_dir):
         def _error(self, exc):
             status = getattr(exc, "status", 500)
             code = getattr(exc, "code", "internal_error")
-            self._send(status, {"error": code, "message": str(exc)})
+            body = {"error": code, "message": str(exc)}
+            details = getattr(exc, "details", None)
+            if details:
+                body["details"] = details
+            self._send(status, body)
 
         def do_GET(self):
             try:
@@ -58,6 +62,10 @@ def build_handler(service, static_dir):
                 if len(parts) == 4 and parts[:2] == ["api", "items"] and parts[3] == "audit":
                     item = service.get_item(int(parts[2]))
                     return self._send(200, {"events": item["audit"]})
+                if len(parts) == 4 and parts[:2] == ["api", "items"] and parts[3] == "bottles":
+                    return self._send(200, {"bottles": service.list_bottles(int(parts[2]))})
+                if len(parts) == 3 and parts[:2] == ["api", "bottles"]:
+                    return self._send(200, service.get_bottle(int(parts[2])))
                 if path == "/":
                     file_path = os.path.join(static_dir, "index.html")
                     with open(file_path, "rb") as handle:
@@ -80,6 +88,17 @@ def build_handler(service, static_dir):
                     return self._send(201, service.create_item(payload, actor, role, region))
                 if len(parts) == 4 and parts[:2] == ["api", "items"] and parts[3] == "sources":
                     return self._send(201, service.add_source(int(parts[2]), payload, actor, role, region))
+                if len(parts) == 4 and parts[:2] == ["api", "items"] and parts[3] == "bottles":
+                    return self._send(201, service.register_bottle(int(parts[2]), payload, actor, role, region))
+                if len(parts) == 4 and parts[:2] == ["api", "items"] and parts[3] == "release":
+                    expected = payload.pop("expected_version", None)
+                    return self._send(200, service.release(int(parts[2]), payload, actor, role, expected, region))
+                if len(parts) == 4 and parts[:2] == ["api", "bottles"] and parts[3] == "handoffs":
+                    return self._send(201, service.handoff(int(parts[2]), payload, actor, role, region))
+                if len(parts) == 4 and parts[:2] == ["api", "bottles"] and parts[3] == "receipts":
+                    return self._send(201, service.receive_receipt(int(parts[2]), payload, actor, role, region))
+                if len(parts) == 4 and parts[:2] == ["api", "bottles"] and parts[3] == "clear-isolation":
+                    return self._send(200, service.clear_isolation(int(parts[2]), payload, actor, role, region))
                 if len(parts) == 4 and parts[:2] == ["api", "items"] and parts[3] == "actions":
                     action = payload.pop("action", "")
                     if not action:

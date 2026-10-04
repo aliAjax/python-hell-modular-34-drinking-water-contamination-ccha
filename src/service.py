@@ -67,3 +67,82 @@ class Service:
 
     def state(self):
         return self.repository.state_summary()
+
+    # ---------------- chain of custody ----------------
+
+    def register_bottle(self, item_id, payload, actor, role, region=None):
+        if not actor or not role:
+            raise DomainError("identity_required", "需要用户身份和角色", 401)
+        if role not in rules.BOTTLE_REGISTER_ROLES:
+            raise DomainError("forbidden", "当前角色不能登记采样瓶", 403)
+        item = self.repository.get_item(item_id)
+        if item["status"] == "cancelled":
+            raise DomainError("invalid_state", "事件已取消，不能登记采样瓶")
+        normalized = domain.normalize_bottle(payload)
+        return self.repository.register_bottle(
+            item_id,
+            normalized["bottle_code"],
+            normalized["seal_number"],
+            normalized["sampled_at"],
+            normalized["zone_id"],
+            normalized["note"],
+            actor,
+            role,
+        )
+
+    def list_bottles(self, item_id):
+        self.repository.get_item(item_id)
+        return self.repository.list_bottles(item_id)
+
+    def get_bottle(self, bottle_id):
+        return self.repository.get_bottle(bottle_id)
+
+    def handoff(self, bottle_id, payload, actor, role, region=None):
+        if not actor or not role:
+            raise DomainError("identity_required", "需要用户身份和角色", 401)
+        normalized = domain.normalize_handoff(payload)
+        return self.repository.submit_handoff(
+            bottle_id,
+            normalized["to_handler"],
+            normalized["to_role"],
+            normalized["seal_number"],
+            normalized["idempotency_key"],
+            actor,
+            role,
+            payload.get("expected_version"),
+        )
+
+    def receive_receipt(self, bottle_id, payload, actor, role, region=None):
+        if not actor or not role:
+            raise DomainError("identity_required", "需要用户身份和角色", 401)
+        if role not in rules.RECEIPT_ROLES:
+            raise DomainError("forbidden", "只有实验室可以提交回执", 403)
+        normalized = domain.normalize_receipt(payload)
+        return self.repository.receive_receipt(
+            bottle_id,
+            normalized["receipt_id"],
+            normalized["result"],
+            normalized["zone_id"],
+            normalized["note"],
+            actor,
+            role,
+        )
+
+    def release(self, item_id, payload, actor, role, expected_version=None, region=None):
+        if not actor or not role:
+            raise DomainError("identity_required", "需要用户身份和角色", 401)
+        if role not in rules.RELEASE_ROLES:
+            raise DomainError("forbidden", "当前角色越权放行", 403)
+        if expected_version is None:
+            raise DomainError("expected_version_required", "放行需要 expected_version", 400)
+        note = payload.get("note", "")
+        return self.repository.release_item(item_id, note, actor, role, expected_version)
+
+    def clear_isolation(self, bottle_id, payload, actor, role, region=None):
+        if not actor or not role:
+            raise DomainError("identity_required", "需要用户身份和角色", 401)
+        if role not in rules.ISOLATION_ROLES:
+            raise DomainError("forbidden", "当前角色不能解除隔离", 403)
+        seal_number = payload.get("seal_number")
+        note = payload.get("note", "")
+        return self.repository.clear_isolation(bottle_id, seal_number, note, actor, role)

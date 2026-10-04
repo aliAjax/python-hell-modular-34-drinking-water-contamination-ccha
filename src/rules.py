@@ -18,6 +18,44 @@ ENFORCE_REGION = False
 REGION_SENSITIVE_ACTIONS = set()
 ACTION_REQUIRES_VERSION = {"advise", "switch_source", "flush", "disinfect", "sample", "restore", "cancel"}
 
+BOTTLE_REGISTER_ROLES = {"field_operator", "lab", "analyst"}
+RECEIPT_ROLES = {"lab"}
+RELEASE_ROLES = {"coordinator", "regulator"}
+ISOLATION_ROLES = {"coordinator", "regulator"}
+
+
+def chain_complete(bottle, handoffs):
+    """保管链完整：未隔离、交接全部完成且封条一致、最终经手角色为实验室。"""
+    if bottle["status"] == "isolated":
+        return False
+    if not handoffs:
+        return bottle["current_role"] == "lab"
+    for handoff in handoffs:
+        if handoff["outcome"] != "completed":
+            return False
+        if handoff["seal_number"] != bottle["seal_number"]:
+            return False
+    return bottle["current_role"] == "lab"
+
+
+def zone_clearance(sample_results, limit):
+    """每个区域以最新有效结果为准：结果 <= 限值视为已恢复。"""
+    latest = {}
+    for result in sample_results:
+        if result.get("valid") is False:
+            continue
+        zone_id = result.get("zone_id")
+        if zone_id is None:
+            continue
+        latest[zone_id] = result
+    return {zone_id: float(entry.get("concentration", 0)) <= float(limit) for zone_id, entry in latest.items()}
+
+
+def gap_zones(zone_ids, sample_results, limit):
+    """尚未达到恢复标准的区域（缺口）。"""
+    clearance = zone_clearance(sample_results, limit)
+    return [zone_id for zone_id in zone_ids if not clearance.get(zone_id)]
+
 
 def assess(payload):
     concentration = float(payload.get("concentration", 0))
