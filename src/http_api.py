@@ -58,6 +58,19 @@ def build_handler(service, static_dir):
                 if len(parts) == 4 and parts[:2] == ["api", "items"] and parts[3] == "audit":
                     item = service.get_item(int(parts[2]))
                     return self._send(200, {"events": item["audit"]})
+                if path == "/api/bottles":
+                    return self._send(200, {"bottles": service.list_bottles()})
+                if len(parts) == 4 and parts[:2] == ["api", "items"] and parts[3] == "bottles":
+                    return self._send(200, {"bottles": service.list_bottles(int(parts[2]))})
+                if len(parts) == 3 and parts[:2] == ["api", "bottles"]:
+                    return self._send(200, service.get_bottle(int(parts[2])))
+                if len(parts) == 4 and parts[:2] == ["api", "bottles"] and parts[3] == "audit":
+                    bottle = service.get_bottle(int(parts[2]))
+                    return self._send(200, {"events": bottle["audit"]})
+                if len(parts) == 4 and parts[:2] == ["api", "bottles"] and parts[3] == "handoffs":
+                    return self._send(200, {"handoffs": service.repository.list_handoffs(int(parts[2]))})
+                if len(parts) == 4 and parts[:2] == ["api", "bottles"] and parts[3] == "receipts":
+                    return self._send(200, {"receipts": service.repository.list_receipts(int(parts[2]))})
                 if path == "/":
                     file_path = os.path.join(static_dir, "index.html")
                     with open(file_path, "rb") as handle:
@@ -86,6 +99,17 @@ def build_handler(service, static_dir):
                         raise DomainError("action_required", "缺少 action", 400)
                     expected = payload.pop("expected_version", None)
                     return self._send(200, service.act(int(parts[2]), action, payload, actor, role, expected, region))
+                if len(parts) == 4 and parts[:2] == ["api", "items"] and parts[3] == "bottles":
+                    return self._send(201, service.register_bottle(int(parts[2]), payload, actor, role))
+                if len(parts) == 4 and parts[:2] == ["api", "bottles"] and parts[3] == "handoffs":
+                    phase = payload.pop("phase", "begin")
+                    bottle_id = int(parts[2])
+                    if phase == "confirm":
+                        return self._send(200, service.confirm_handoff(bottle_id, payload, actor, role))
+                    expected = payload.pop("expected_version", None)
+                    return self._send(200, service.begin_handoff(bottle_id, payload, actor, role, expected))
+                if len(parts) == 4 and parts[:2] == ["api", "bottles"] and parts[3] == "receipts":
+                    return self._send(201, service.submit_receipt(int(parts[2]), payload, actor, role))
                 return self._send(404, {"error": "not_found", "message": "接口不存在"})
             except DomainError as exc:
                 return self._error(exc)

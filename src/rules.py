@@ -18,6 +18,59 @@ ENFORCE_REGION = False
 REGION_SENSITIVE_ACTIONS = set()
 ACTION_REQUIRES_VERSION = {"advise", "switch_source", "flush", "disinfect", "sample", "restore", "cancel"}
 
+REGISTER_BOTTLE_ROLES = {"field_operator", "lab"}
+BEGIN_HANDOFF_ROLES = {"field_operator", "courier", "lab"}
+CONFIRM_HANDOFF_ROLES = {"field_operator", "courier", "lab"}
+LAB_RECEIPT_ROLES = {"lab"}
+
+
+def custody_zone_states(item_payload):
+    custody = item_payload.get("custody")
+    if not custody or not custody.get("zones"):
+        return {}
+    return {zone["zone_id"]: zone["state"] for zone in custody["zones"]}
+
+
+def sampling_status(item_payload):
+    """无保管记录的（旧）事件一律按未采样处理。"""
+    zones = custody_zone_states(item_payload)
+    if not zones:
+        return "unsampled"
+    if all(state == "cleared" for state in zones.values()):
+        return "cleared"
+    if any(state == "detected" for state in zones.values()):
+        return "sampled"
+    return "sampling"
+
+
+def recompute_custody_zones(zone_ids, effective_results, limit):
+    """effective_results：每个瓶子仅包含当前有效（未被取代）的回执，瓶子必须保管链完整。
+
+    区域状态：
+    - pending：尚无保管链完整的回执
+    - detected：任一有效回执超过限值
+    - cleared：存在有效回执且全部在限值以内
+    """
+    by_zone = {zone_id: [] for zone_id in zone_ids}
+    for result in effective_results:
+        if result.get("zone_id") in by_zone:
+            by_zone[result["zone_id"]].append(result)
+    zones = []
+    for zone_id in zone_ids:
+        results = sorted(by_zone.get(zone_id, []),
+                         key=lambda item: (item.get("analyzed_at") or "", item.get("created_at") or ""))
+        if not results:
+            state = "pending"
+            latest = None
+        else:
+            latest = results[-1]
+            state = "detected" if any(float(r["concentration"]) > float(limit) for r in results) else "cleared"
+        zones.append({"zone_id": zone_id, "state": state,
+                      "latest": {"bottle_id": latest["bottle_id"], "bottle_no": latest.get("bottle_no"),
+                                 "receipt_no": latest["receipt_no"], "concentration": latest["concentration"],
+                                 "analyzed_at": latest["analyzed_at"]} if latest else None})
+    return zones
+
 
 def assess(payload):
     concentration = float(payload.get("concentration", 0))
@@ -111,11 +164,19 @@ def apply_action(item, action, payload, actor, role):
         _need_status(item, {"sampled"})
         if not payload.get("all_zones_cleared"):
             raise DomainError("zones_not_cleared", "仍有区域未完成水质恢复", 409)
-        limit = float(current.get("limit", 0))
-        results = current.get("sample_results", [])
-        if not results or any(float(result["concentration"]) > limit for result in results):
-            raise DomainError("quality_not_met", "复检结果未全部达到限值", 409)
-        current["restoration"] = {"actor": actor, "note": payload.get("note", "")}
+        custody = current.get("custody")
+        zones = custody.get("zones") if custody else None
+        if not zones:
+            # 旧事件没有保管记录：历史结果仍可查，但按未采样处理，结果不予采信
+            raise DomainError("custody_missing", "无完整保管链记录，按未采样处理，不能恢复", 409)
+        failed = [zone["zone_id"] for zone in zones if zone["state"] != "cleared"]
+        if failed:
+            raise DomainError("quality_not_met", "以下区域缺口未闭合或复检未达标：%s" % ",".join(failed), 409)
+        current["restoration"] = {
+            "actor": actor,
+            "note": payload.get("note", ""),
+            "zone_ids": [zone["zone_id"] for zone in zones],
+        }
         return "restored", current, {"restoration": current["restoration"]}
 
     if action == "cancel":

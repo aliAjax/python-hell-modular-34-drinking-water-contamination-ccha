@@ -91,3 +91,34 @@ def normalize_source(payload):
         "note": payload.get("note", ""),
     }
     return result
+
+
+def normalize_bottle(payload):
+    bottle_no = require_text(payload, "bottle_no")
+    zone_id = require_text(payload, "zone_id")
+    sampled_at = parse_timestamp(payload, "sampled_at")
+    seal_no = require_text(payload, "seal_no")
+    return {"bottle_no": bottle_no, "zone_id": zone_id, "sampled_at": sampled_at, "seal_no": seal_no}
+
+
+def normalize_handoff(payload, require_seal=False):
+    request_id = require_text(payload, "request_id")
+    to_holder = require_text(payload, "to_holder")
+    to_role = require_text(payload, "to_role")
+    result = {"request_id": request_id, "to_holder": to_holder, "to_role": to_role}
+    seal = payload.get("observed_seal")
+    if require_seal:
+        if not isinstance(seal, str) or not seal.strip():
+            raise DomainError("seal_required", "确认交接时必须核对封条号")
+        result["observed_seal"] = seal.strip()
+    else:
+        if seal is not None:
+            result["observed_seal"] = str(seal).strip()
+    return result
+
+
+def normalize_receipt(payload):
+    receipt_no = require_text(payload, "receipt_no")
+    concentration = number(payload, "concentration", 0)
+    analyzed_at = parse_timestamp(payload, "analyzed_at")
+    return {"receipt_no": receipt_no, "concentration": concentration, "analyzed_at": analyzed_at}

@@ -1,5 +1,10 @@
-<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>饮用水污染响应</title><body><h1>市政饮用水污染响应</h1><p>使用 JSON API 创建污染事件、登记水源或管网记录，并完成复检、通知、冲洗、消毒和恢复。</p><pre>GET /health
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>饮用水污染响应</title><body><h1>市政饮用水污染响应</h1><p>使用 JSON API 创建污染事件、登记水源或管网记录，完成复检、通知、冲洗、消毒和恢复；采样瓶、交接和实验室回执接入保管账，结果只认完整保管链。</p><pre>GET /health
 GET /api/state
 POST /api/items
 POST /api/items/{id}/sources
-POST /api/items/{id}/actions</pre></body></html>
+POST /api/items/{id}/actions
+POST /api/items/{id}/bottles            登记采样瓶（采样时刻/封条号/经手人）
+POST /api/bottles/{id}/handoffs         交接：{"phase":"begin"|"confirm", request_id, to_holder, to_role, observed_seal}
+POST /api/bottles/{id}/receipts         实验室回执（回执号唯一，晚到结果取代旧回执）
+GET  /api/bottles/{id}                  瓶子、交接、回执与 custody_chain_complete
+GET  /api/bottles/{id}/audit            保管链审计（哈希链）</pre><p>断档或封条不符立即隔离；隔离瓶结果不采信；晚到坏结果使已恢复区域立即失效并重算缺口；越权放行返回 403；request_id 与回执号保证重试不重复。</p></body></html>
